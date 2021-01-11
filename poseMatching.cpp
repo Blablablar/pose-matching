@@ -10,7 +10,7 @@ using cv::Point2f;
 
 bool comp(float c)
 {
-	return 1.8 < c;
+	return 0.5 < c;
 }
 
 bool poseMatching::initialize(std::string movement)
@@ -23,10 +23,9 @@ bool poseMatching::initialize(std::string movement)
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 2;
-		smoothRatioWindow = 2;
+		countConfThre = 0.3;
 		threCosine = 0.95;
 		threDist = 0.7;
-		ratioThre = 1;
 		timekeeping = false;
 		standardTime = 0.0;
 		suggestion = "收紧核心，动作幅度加大";
@@ -38,10 +37,9 @@ bool poseMatching::initialize(std::string movement)
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 4;
-		smoothRatioWindow = 4;
+		countConfThre = 0.4;
 		threCosine = 0.95;
 		threDist = 0.72;
-		ratioThre = 1;
 		timekeeping = true;
 		standardTime = 2;
 		suggestion = "手臂与地面平行，不要耸肩";
@@ -49,41 +47,37 @@ bool poseMatching::initialize(std::string movement)
 	}
 	else if (movementName == "jugangling")
 	{
-		int tempIdx[14] = { 0,0,0,0,1,1,1,1,0,0,0,0,0,0 };
+		int tempIdx[14] = { 1,1,1,1,1,1,1,1,0,0,0,0,0,0 };
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 2;
-		smoothRatioWindow = 2;
-		threCosine = 0.93;
+		countConfThre = 0.3;
+		threCosine = 0.95;
 		threDist = 0.7;
-		ratioThre = 0.4;
 		timekeeping = false;
 		standardTime = 0.0;
 		suggestion = "下蹲时腰背挺直，发力时收紧核心，脚尖着地";
-		perfectThre = 97;
+		perfectThre = 95;
 	}
 	else
 	{
 		cout << "error!! input can't fit any movement" << endl;
 		return false;
 	}
-	standardKP = loadKPFromFile(movementName);
+	loadStandardKPFromFile();
 
 	//用于做affine的躯干3个点（1头，9左胯，10右胯）
 	int tempIdx[14] = { 1,0,0,0,0,0,0,0,1,1,0,0,0,0 };
 	memcpy(affineIdx, tempIdx, sizeof(tempIdx));
 
-
-	//从文件中读取用于calibration的kp
-	caliKP = loadKPFromFile("standing");
-	//用于做calibration的14个点
-	int tempIdx2[14] = { 1,1,1,1,0,0,0,0,1,1,1,1,1,1 };
+	//用于做calibration的8个点
+	int tempIdx2[14] = { 1,1,1,1,1,1,1,1,0,0,0,0,0,0 };
 	memcpy(calibrationIdx, tempIdx2, sizeof(tempIdx2));
 
 	//参数初始化
 	//calibration 相关
 	calibrationWindow = 20;
-	calibrationNum = 16;
+	calibrationNum = 15;
 	calibrationDone = false;
 
 	//count 相关
@@ -100,13 +94,16 @@ bool poseMatching::initialize(std::string movement)
 }
 
 //根据实际路径更改standardFile路径
-std::vector<cv::Point> poseMatching::loadKPFromFile(std::string movementName)
+void poseMatching::loadStandardKPFromFile()
 {
-	string fileName = "./teacher\\" + movementName + "_standard.txt";
+	string fileName = 
+		"F:\\Kexin\\posture\\pose_matching\\matching_VS2017\\matching_VS2017\\teacher\\" 
+		+ movementName + "_standard.txt";
 	std::ifstream fin(fileName);
 	if (!fin)
 	{
 		cout << "error! can't open file" << endl;
+		return;
 	}
 
 	vector<double> in;
@@ -131,54 +128,53 @@ std::vector<cv::Point> poseMatching::loadKPFromFile(std::string movementName)
 	fin.close();
 
 	Point pt;
-	std::vector<cv::Point> kp;
 	for (int i = 4; i < in.size(); i = i + 3)
 	{
 		pt.x = in[i];
 		pt.y = in[i + 1];
-		kp.push_back(pt);
+		standardKP.push_back(pt);
 	}
 
-	cout << "load " << kp.size() << " points from standard kp file!" << endl;
-
-	return kp;
+	cout << "load " << standardKP.size() << " points from standard kp file!" << endl;
 }
 
-void poseMatching::loadKP(std::vector<cv::Point> kp)
+void poseMatching::loadKP(std::vector<std::pair<cv::Point, float>> kp)
 {
-	userKP = kp;
+	userData = kp;
+	for (int i = 0; i < userData.size(); i++)
+	{
+		userKP.push_back(userData[i].first);
+		userConfidence.push_back(userData[i].second);
+	}
 }
 
 bool poseMatching::calibration()
 {
 	if (!calibrationDone)
 	{
-		userKPAffine = affine(userKP, caliKP);
-
-		vector<Point> userKP_touse;
-		vector<Point> caliKP_touse;
-
+		vector<float> cali;
 		for (int i = 0; i < 14; i++)
 		{
 			if (calibrationIdx[i] == 1)
 			{
-				userKP_touse.push_back(userKPAffine[i]);
-				caliKP_touse.push_back(caliKP[i]);
+				cali.push_back(userConfidence[i]);
 			}
 		}
-
-		float distSimi = getDistSimilarity(userKP_touse, caliKP_touse);
-		float cosSimi = getCosineSimilarity(userKP_touse, caliKP_touse);
-
-		caliSimivec.push_back(distSimi + cosSimi);
-		if (caliSimivec.size() > calibrationWindow)
+		float meanConfidence = getMean(cali);
+		if (DEBUG)
 		{
-			//删除首元素
-			caliSimivec.erase(caliSimivec.begin());
+			cout << meanConfidence << endl;
 		}
 
-		//6fps下，caliSimivec中超过15帧平均caliSimi>Thre,视为calibration成功
-		if (count_if(caliSimivec.begin(), caliSimivec.end(), comp)>= calibrationNum)
+		confidenceVec.push_back(meanConfidence);
+		if (confidenceVec.size() > calibrationWindow)
+		{
+			//删除首元素
+			confidenceVec.erase(confidenceVec.begin());
+		}
+
+		//6fps下，confidenceVec中超过15帧平均confidence>Thre,视为calibration成功
+		if (count_if(confidenceVec.begin(), confidenceVec.end(), comp)>= calibrationNum)
 		{
 			calibrationDone = true;
 			cout << "Calibration Done" << endl;
@@ -194,62 +190,107 @@ bool poseMatching::calibration()
 
 void poseMatching::affineWithStandard()
 {
-	userKPAffine = affine(userKP, standardKP);
+	//用于仿射变换的躯体3点
+	//TO TEST: opencv的仿射变换函数只能用3个点
+	//选择头、左髋、右髋
+	Point2f bodycenter[3];
+	Point2f standardcenter[3];
+	//for (int i = 0; i < 14; i++)
+	//{
+	//	if (affineIdx[i] == 1)
+	//	{
+	//		bodycenter[i] = userKP[i];
+	//		standardcenter[i] = standardKP[i];
+	//	}
+	//}
+	bodycenter[0] = userKP[0];
+	bodycenter[1] = userKP[8];
+	bodycenter[2] = userKP[9];
+	standardcenter[0] = standardKP[0];
+	standardcenter[1] = standardKP[8];
+	standardcenter[2] = standardKP[9];
+
+	//opencv函数做仿射变换
+	//求仿射矩阵，2*3
+	//[a, b, c]
+	//[d, e, f]
+	cv::Mat affineMatrix = cv::getAffineTransform(bodycenter, standardcenter);
+	double affineMatrixData[2][3];
+	for (int i = 0; i < affineMatrix.rows; i++)
+	{
+		for (int j = 0; j < affineMatrix.cols; j++)
+		{
+			affineMatrixData[i][j] = affineMatrix.at<double>(i, j);
+		}
+	}
+
+	for (int i = 0; i < userKP.size(); i++)
+	{
+		float x = affineMatrixData[0][0] * userKP[i].x + affineMatrixData[0][1] * userKP[i].y + affineMatrixData[0][2];
+		float y = affineMatrixData[1][0] * userKP[i].x + affineMatrixData[1][1] * userKP[i].y + affineMatrixData[1][2];
+		userKPAffine.push_back(Point(x, y));
+	}
 }
 
 void poseMatching::getSimilarity()
 {
-	vector<Point> userKP_touse;
+	vector<Point> userActionKP;
 	vector<Point> standardKP_toUse;
-
-	vector<float> userkpsize = getUserSize(userKP);
-	vector<float> userkpsizeAffine = getUserSize(userKPAffine);
-
-	float userkpHeight = userkpsize[3] - userkpsize[1];
-	float userkpWidth = userkpsize[2] - userkpsize[0];
-	float affineHeight = userkpsizeAffine[3] - userkpsizeAffine[1];
-	float affineWidth = userkpsizeAffine[2] - userkpsizeAffine[0];
-
-	float userkpArea = (userkpHeight)*(userkpWidth);
-	float affineArea = (affineHeight)*(affineHeight);
-	float AreaRatio = userkpArea / affineArea;
 	
-
+	float meanConfi = 0.0;
 	for (int i = 0; i < 14; i++)
 	{
 		if (matchingKPIdx[i] == 1)
 		{
-			userKP_touse.push_back(userKPAffine[i]);
+			userActionKP.push_back(userKPAffine[i]);
 			standardKP_toUse.push_back(standardKP[i]);
+			meanConfi = meanConfi + userConfidence[i];
 		}
 	}
-
-	//欧氏距离求相似性
-	float distSimi = getDistSimilarity(userKP_touse, standardKP_toUse);
-	if (AreaRatio < 0.2)  //affine失败
+	meanConfi = meanConfi / userActionKP.size();
+	if (DEBUG)
 	{
-		distSimi = 0;
+		cout << "meanConfi: "<<meanConfi << endl;
 	}
 
-	if (smoothDisVec.size() >= smoothSimilarityWindow)
+	if (meanConfi > countConfThre)  //计数用的关键点的confidence  大于一定值
 	{
-		smoothDisVec.erase(smoothDisVec.begin());
-	}
-	smoothDisVec.push_back(distSimi);
+		//欧氏距离求相似性
+		float meanD = 0.0;
+		for (int i = 0; i < userActionKP.size(); i++)
+		{
+			float d = get2ptdistance(userActionKP[i], standardKP_toUse[i]);
+			d = 100.0 / (100.0 + d);
+			meanD = meanD + d;
+		}
+		meanD = meanD / userActionKP.size();
+
+		if (smoothDisVec.size() >= smoothSimilarityWindow)
+		{
+			smoothDisVec.erase(smoothDisVec.begin());
+		}
+		smoothDisVec.push_back(meanD);
 
 
-	//余弦相似性
-	float cosineSimi = getCosineSimilarity(userKP_touse, standardKP_toUse);
-	if (AreaRatio < 0.2)  //affine失败
-	{
-		cosineSimi = 0;
-	}
-	if (smoothCosVec.size() >= smoothSimilarityWindow)
-	{
-		smoothCosVec.erase(smoothCosVec.begin());
-	}
-	smoothCosVec.push_back(cosineSimi);
+		//余弦相似性
+		//拉成一条直线
+		vector<float> userActionKP_line;
+		vector<float> standardKP_line;
+		for (int i = 0; i < userActionKP.size(); i++)
+		{
+			userActionKP_line.push_back(userActionKP[i].x);
+			userActionKP_line.push_back(userActionKP[i].y);
+			standardKP_line.push_back(standardKP_toUse[i].x);
+			standardKP_line.push_back(standardKP_toUse[i].y);
+		}
+		float cosineSimi = getCosineSimilarity(userActionKP_line, standardKP_line);
 
+		if (smoothCosVec.size() >= smoothSimilarityWindow)
+		{
+			smoothCosVec.erase(smoothCosVec.begin());
+		}
+		smoothCosVec.push_back(cosineSimi);
+	}
 }
 
 int poseMatching::countAction()
@@ -257,7 +298,6 @@ int poseMatching::countAction()
 	//求距离相似性和余弦相似性在滑动平均窗口中的均值
 	float distSimi = getMean(smoothDisVec);
 	float cosSimi = getMean(smoothCosVec);
-
 	if (DEBUG)
 	{
 		cout << "distSimilarity: " << distSimi << endl;
@@ -354,56 +394,11 @@ float poseMatching::getSuggestion()
 
 void poseMatching::clear()
 {
-
+	userData.clear();
 	userKP.clear();
 	userKPAffine.clear();
+	userConfidence.clear();
 	score = 0.0;
-}
-
-std::vector<cv::Point> affine(std::vector<cv::Point> user, std::vector<cv::Point> standard)
-{
-	if (user.size() < 14 || standard.size() < 14)
-	{
-		cout << "There should be 14 KP points" << endl;
-	}
-
-
-	std::vector<cv::Point> userKPAffine;
-	//用于仿射变换的躯体3点
-	//TO TEST: opencv的仿射变换函数只能用3个点
-	//选择头、左髋、右髋
-	Point2f bodycenter[3];
-	Point2f standardcenter[3];
-
-	bodycenter[0] = user[0];
-	bodycenter[1] = user[8];
-	bodycenter[2] = user[9];
-	standardcenter[0] = standard[0];
-	standardcenter[1] = standard[8];
-	standardcenter[2] = standard[9];
-
-	//opencv函数做仿射变换
-	//求仿射矩阵，2*3
-	//[a, b, c]
-	//[d, e, f]
-	cv::Mat affineMatrix = cv::getAffineTransform(bodycenter, standardcenter);
-	double affineMatrixData[2][3];
-	for (int i = 0; i < affineMatrix.rows; i++)
-	{
-		for (int j = 0; j < affineMatrix.cols; j++)
-		{
-			affineMatrixData[i][j] = affineMatrix.at<double>(i, j);
-		}
-	}
-
-	for (int i = 0; i < user.size(); i++)
-	{
-		float x = affineMatrixData[0][0] * user[i].x + affineMatrixData[0][1] * user[i].y + affineMatrixData[0][2];
-		float y = affineMatrixData[1][0] * user[i].x + affineMatrixData[1][1] * user[i].y + affineMatrixData[1][2];
-		userKPAffine.push_back(Point(x, y));
-	}
-	return userKPAffine;
-
 }
 
 float get2ptdistance(Point2f p1, Point2f p2)
@@ -422,18 +417,8 @@ float getMold(const vector<float>& vec)
 }
 
 //求两个向量的余弦相似性
-float getCosineSimilarity(const vector<Point>& lhsP, const vector<Point>& rhsP)
+float getCosineSimilarity(const vector<float>& lhs, const vector<float>& rhs) 
 {
-	vector<float> lhs;
-	vector<float> rhs;
-	for (int i = 0; i < lhsP.size(); i++)
-	{
-		lhs.push_back(lhsP[i].x);
-		lhs.push_back(lhsP[i].y);
-		rhs.push_back(rhsP[i].x);
-		rhs.push_back(rhsP[i].y);
-	}
-
 	int n = lhs.size();
 	assert(n == rhs.size());
 	float tmp = 0.0;  //内积
@@ -441,20 +426,6 @@ float getCosineSimilarity(const vector<Point>& lhsP, const vector<Point>& rhsP)
 		tmp += lhs[i] * rhs[i];
 	float result = tmp / (getMold(lhs)*getMold(rhs));
 	return result * 0.5 + 0.5;
-}
-
-float getDistSimilarity(const vector<Point>& lhsP, const vector<Point>& rhsP)
-{
-	float meanD = 0.0;
-	for (int i = 0; i < lhsP.size(); i++)
-	{
-		float d = get2ptdistance(lhsP[i], rhsP[i]);
-		d = 100.0 / (100.0 + d);
-		meanD = meanD + d;
-	}
-	meanD = meanD / rhsP.size();
-
-	return meanD;
 }
 
 //求一个vector中的数据均值
@@ -468,40 +439,4 @@ float getMean(vector<float>& vec)
 	mean = mean / float(vec.size());
 
 	return mean;
-}
-
-
-//返回{ minX,minY,maxX,maxY };
-vector<float> getUserSize(vector<Point> userkp)
-{
-	float minX, minY, maxX, maxY;
-	minX = 10000;
-	minY = 10000;
-	maxX = -10000;
-	maxY = -10000;
-
-	for (int i = 0; i < userkp.size(); i++)
-	{
-		if (userkp[i].x < minX)
-		{
-			minX = userkp[i].x;
-		}
-		if (userkp[i].y < minY)
-		{
-			minY = userkp[i].y;
-		}
-
-		if (userkp[i].x > maxX)
-		{
-			maxX = userkp[i].x;
-		}
-		if (userkp[i].y > maxY)
-		{
-			maxY = userkp[i].y;
-		}
-	}
-
-	vector<float> s = { minX,minY,maxX,maxY };
-
-	return s;
 }
