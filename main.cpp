@@ -10,14 +10,12 @@
 
 
 std::vector<std::pair<cv::Point, float>> getKPloc(ncnn::Mat& m);
-std::vector<cv::Point> postProc(ncnn::Mat& m);
-float sigmoid(float x);
 
 
 int main()
 {
-	std::string testVideo = 
-		"./testVideo\\jugangling_demo1_crop.avi";
+	std::string testVideo =
+		"F:\\Kexin\\posture\\pose_matching\\matching_VS2017\\matching_VS2017\\testVideo\\cepingju_new1_crop.avi";
 	cv::VideoCapture video(testVideo);
 	if (!video.isOpened())
 	{
@@ -26,8 +24,8 @@ int main()
 	int w = video.get(3);
 	int h = video.get(4);
 
-	std::string modelPath = "./model\\";
-	std::string modelName = "model_torch_256x192_heatmap_sim8";
+	std::string modelPath = "F:\\Kexin\\posture\\pose_matching\\matching_VS2017\\matching_VS2017\\model\\";
+	std::string modelName = "model_torch_heatmap_sim";
 	std::string paramName = modelPath + modelName + ".param";
 	std::string binName = modelPath + modelName + ".bin";
 	ncnn::Net net;
@@ -38,7 +36,7 @@ int main()
 	cv::Mat img;
 
 	poseMatching matching;
-	matching.initialize("jugangling");
+	matching.initialize("cepingju");
 
 	Timer time;
 
@@ -49,7 +47,7 @@ int main()
 		if (video.read(img))
 		{
 			ncnn::Mat in = ncnn::Mat::from_pixels_resize(
-				img.data, ncnn::Mat::PIXEL_RGB, w, h, 192, 256);
+				img.data, ncnn::Mat::PIXEL_RGB, w, h, 168, 224);
 
 			float mean[3] = { 128.f,128.f,128.f };
 			float norm[3] = { 1 / 128.f ,1 / 128.f ,1 / 128.f };
@@ -64,13 +62,11 @@ int main()
 			ncnn::Mat out;
 			ex.extract("output", out);
 
+			std::vector<std::pair<cv::Point, float>> kp;
 
-			//std::vector<std::pair<cv::Point, float>> kp;
-			//kp = getKPloc(out);
-			std::vector<cv::Point> kp;
-			kp = postProc(out);
+			kp = getKPloc(out);
 
-			time.start();
+			//time.start();
 			//matching
 			matching.loadKP(kp);
 			if (matching.calibration())
@@ -82,20 +78,20 @@ int main()
 				matching.getSuggestion();
 			}
 			matching.clear();
-			time.stop();
-			std::cout << "matching time: " << time.getElapsedTimeInMilliSec() << std::endl;
+			//time.stop();
+			//std::cout << "matching time: " << time.getElapsedTimeInMilliSec() << std::endl;
 
 
-			cv::resize(img, img, cv::Size(192, 256));
+			cv::resize(img, img, cv::Size(168, 224));
 			for (int i = 0; i < kp.size(); i++)
 			{
-				cv::circle(img, kp[i], 2, cv::Scalar(255, 0, 0), -1);
+				cv::circle(img, kp[i].first * 4, 2, cv::Scalar(255, 0, 0), -1);
 			}
 			
 			//writer << img;
 
 			cv::imshow("test", img);
-			cv::waitKey(0);
+			cv::waitKey(1);
 		}
 		else
 		{
@@ -139,44 +135,4 @@ std::vector<std::pair<cv::Point, float>> getKPloc(ncnn::Mat& m)
 		loc.push_back({ maxLoc, maxNum });
 	}
 	return loc;
-}
-
-std::vector<cv::Point> postProc(ncnn::Mat& m)
-{
-	//找到每个channel的最大值对应的x和y坐标
-	std::vector<cv::Point> loc;
-
-	for (int q = 0; q < m.c; q++)
-	{
-		const float* ptr = m.channel(q);
-		float maxNum = -100.0;
-		cv::Point maxLoc(0, 0);
-		for (int y = 0; y < m.h; y++)
-		{
-			for (int x = 0; x < m.w; x = x + 2)
-			{
-				float t1 = ptr[x];
-				float t2 = ptr[x + 1];
-				t1 = sigmoid(t1);
-				t2 = sigmoid(t2);
-				cv::Point pt;
-				pt.x = t1 * 192;
-				pt.y = t2 * 256;
-				loc.push_back(pt);
-				//std::cout << pt << std::endl;
-			}
-			ptr += m.w;
-			//printf("\n");
-		}
-		//std::cout << maxNum << std::endl;
-		loc.push_back(maxLoc);
-		//printf("------------------------\n");
-	}
-	/*std::cout << loc << std::endl;*/
-	return loc;
-}
-
-float sigmoid(float x)
-{
-	return (1 / (1 + exp(-x)));
 }

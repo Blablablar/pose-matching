@@ -6,7 +6,7 @@
 
 #include"Timer.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 class poseMatching
 {
@@ -15,9 +15,9 @@ public:
 	//初始化，输入动作名称小写全拼
 	bool initialize(std::string movement);
 	//读取已处理好的，存储在txt文件中的标准帧KP
-	std::vector<cv::Point> loadKPFromFile(std::string movementName);
+	void loadStandardKPFromFile();
 	//读入当前帧的kp
-	void loadKP(std::vector<cv::Point> kp);
+	void loadKP(std::vector<std::pair<cv::Point, float>> kp);
 	bool calibration();
 	void affineWithStandard();
 	void getSimilarity();
@@ -38,10 +38,11 @@ public:
 private:
 	//动作名称，小写全拼
 	std::string movementName;
-	//当前帧的kp
+	//当前帧的kp和confidence
+	std::vector<std::pair<cv::Point, float>> userData;
 	std::vector<cv::Point> userKP;
 	std::vector<cv::Point> userKPAffine;
-
+	std::vector<float> userConfidence;
 
 	//标准帧的kp，从txt文件中读取，取自教练视频
 	std::vector<cv::Point> standardKP;   
@@ -54,11 +55,9 @@ private:
 
 
 	//calibration
-	//用于做calibration的kp
-	std::vector<cv::Point> caliKP;
 	int calibrationWindow;  //calibration所取的时间窗，即confidenceVec的长度，维持当前帧前20帧（6fps）,帧率提高或降低，需更改这个值
 	//int smoothCaliWindow;  //滑动平均的窗口大小，即smoothConfidenceVec的长度，对于6fps的检测速度，可取3，帧率变化时需更改
-	std::vector<float> caliSimivec;
+	std::vector<float> confidenceVec;
 	//std::vector<float> smoothConfidenceVec;
 	int calibrationNum;
 	bool calibrationDone;  //判断用户是否完成calibration
@@ -87,15 +86,10 @@ private:
 	std::vector<std::vector<cv::Point>> poseAccumulate;
 	std::string suggestion;
 	float perfectThre;
-
-
 };
 
 
 float get2ptdistance(cv::Point2f p1, cv::Point2f p2);
 float getMold(const std::vector<float>& vec);
-float getCosineSimilarity(const std::vector<cv::Point>& lhsP, const std::vector<cv::Point>& rhsP);
-float getDistSimilarity(const std::vector<cv::Point>& lhsP, const std::vector<cv::Point>& rhsP);
+float getCosineSimilarity(const std::vector<float>& lhs, const std::vector<float>& rhs);
 float getMean(std::vector<float>& vec);
-
-std::vector<cv::Point> affine(std::vector<cv::Point> user, std::vector<cv::Point> standard);
