@@ -17,7 +17,7 @@ float sigmoid(float x);
 int main()
 {
 	std::string testVideo = 
-		"./testVideo\\jugangling_demo1_crop.avi";
+		"./testVideo\\kaihetiao_new1_crop.avi";
 	cv::VideoCapture video(testVideo);
 	if (!video.isOpened())
 	{
@@ -38,7 +38,7 @@ int main()
 	cv::Mat img;
 
 	poseMatching matching;
-	matching.initialize("jugangling");
+	matching.initialize("kaihetiao");
 
 	Timer time;
 
@@ -81,17 +81,17 @@ int main()
 				matching.keepTime();
 				matching.getSuggestion();
 			}
-			matching.clear();
+			
 			time.stop();
 			std::cout << "matching time: " << time.getElapsedTimeInMilliSec() << std::endl;
 
 
 			cv::resize(img, img, cv::Size(192, 256));
-			for (int i = 0; i < kp.size(); i++)
+			for (int i = 0; i < matching.userKPAffine.size(); i++)
 			{
-				cv::circle(img, kp[i], 2, cv::Scalar(255, 0, 0), -1);
+				cv::circle(img, matching.userKPAffine[i], 2, cv::Scalar(255, 0, 0), -1);
 			}
-			
+			matching.clear();
 			//writer << img;
 
 			cv::imshow("test", img);

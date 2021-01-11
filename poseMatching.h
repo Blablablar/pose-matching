@@ -6,7 +6,7 @@
 
 #include"Timer.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 class poseMatching
 {
@@ -35,12 +35,14 @@ public:
 
 	void clear();
 
+	std::vector<cv::Point> userKPAffine;
+
 private:
 	//动作名称，小写全拼
 	std::string movementName;
 	//当前帧的kp
 	std::vector<cv::Point> userKP;
-	std::vector<cv::Point> userKPAffine;
+	
 
 
 	//标准帧的kp，从txt文件中读取，取自教练视频
@@ -67,10 +69,13 @@ private:
 	//count
 	bool state;  //判断用户是否处于标准动作中
 	int smoothSimilarityWindow; //相似性滑动平均窗口，6fps时可取3
+	int smoothRatioWindow;
 	std::vector<float> smoothCosVec;  //余弦相似性
 	std::vector<float> smoothDisVec;  //欧式距离相似性
+	std::vector<float> smoothRatioVec;   //affine之前和affine之后kp面积的比例
 	float threCosine;   //余弦相似性阈值
 	float threDist;    //欧氏距离相似性阈值
+	float ratioThre;
 	float countConfThre;    //计数时，若此帧的动作关键点置信度低于阈值，此帧不采用
 
 
@@ -99,3 +104,5 @@ float getDistSimilarity(const std::vector<cv::Point>& lhsP, const std::vector<cv
 float getMean(std::vector<float>& vec);
 
 std::vector<cv::Point> affine(std::vector<cv::Point> user, std::vector<cv::Point> standard);
+//返回{ minX,minY,maxX,maxY };
+std::vector<float> getUserSize(std::vector<cv::Point> userkp);

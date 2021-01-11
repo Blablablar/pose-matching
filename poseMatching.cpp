@@ -23,8 +23,10 @@ bool poseMatching::initialize(std::string movement)
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 2;
+		smoothRatioWindow = 2;
 		threCosine = 0.95;
 		threDist = 0.7;
+		ratioThre = 1;
 		timekeeping = false;
 		standardTime = 0.0;
 		suggestion = "收紧核心，动作幅度加大";
@@ -36,8 +38,10 @@ bool poseMatching::initialize(std::string movement)
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 4;
+		smoothRatioWindow = 4;
 		threCosine = 0.95;
 		threDist = 0.72;
+		ratioThre = 1;
 		timekeeping = true;
 		standardTime = 2;
 		suggestion = "手臂与地面平行，不要耸肩";
@@ -45,12 +49,14 @@ bool poseMatching::initialize(std::string movement)
 	}
 	else if (movementName == "jugangling")
 	{
-		int tempIdx[14] = { 0,0,0,1,1,1,1,1,1,1,1,1,0,0 };
+		int tempIdx[14] = { 0,0,0,0,1,1,1,1,0,0,0,0,0,0 };
 		memcpy(matchingKPIdx, tempIdx, sizeof(tempIdx));
 		//如果计数不准确，这些参数需要调整
 		smoothSimilarityWindow = 2;
-		threCosine = 0.95;
-		threDist = 0.72;
+		smoothRatioWindow = 2;
+		threCosine = 0.93;
+		threDist = 0.7;
+		ratioThre = 0.4;
 		timekeeping = false;
 		standardTime = 0.0;
 		suggestion = "下蹲时腰背挺直，发力时收紧核心，脚尖着地";
@@ -171,7 +177,7 @@ bool poseMatching::calibration()
 			caliSimivec.erase(caliSimivec.begin());
 		}
 
-		//6fps下，confidenceVec中超过15帧平均confidence>Thre,视为calibration成功
+		//6fps下，caliSimivec中超过15帧平均caliSimi>Thre,视为calibration成功
 		if (count_if(caliSimivec.begin(), caliSimivec.end(), comp)>= calibrationNum)
 		{
 			calibrationDone = true;
@@ -193,20 +199,37 @@ void poseMatching::affineWithStandard()
 
 void poseMatching::getSimilarity()
 {
-	vector<Point> userActionKP;
+	vector<Point> userKP_touse;
 	vector<Point> standardKP_toUse;
+
+	vector<float> userkpsize = getUserSize(userKP);
+	vector<float> userkpsizeAffine = getUserSize(userKPAffine);
+
+	float userkpHeight = userkpsize[3] - userkpsize[1];
+	float userkpWidth = userkpsize[2] - userkpsize[0];
+	float affineHeight = userkpsizeAffine[3] - userkpsizeAffine[1];
+	float affineWidth = userkpsizeAffine[2] - userkpsizeAffine[0];
+
+	float userkpArea = (userkpHeight)*(userkpWidth);
+	float affineArea = (affineHeight)*(affineHeight);
+	float AreaRatio = userkpArea / affineArea;
 	
+
 	for (int i = 0; i < 14; i++)
 	{
 		if (matchingKPIdx[i] == 1)
 		{
-			userActionKP.push_back(userKPAffine[i]);
+			userKP_touse.push_back(userKPAffine[i]);
 			standardKP_toUse.push_back(standardKP[i]);
 		}
 	}
 
 	//欧氏距离求相似性
-	float distSimi = getDistSimilarity(userActionKP, standardKP_toUse);
+	float distSimi = getDistSimilarity(userKP_touse, standardKP_toUse);
+	if (AreaRatio < 0.2)  //affine失败
+	{
+		distSimi = 0;
+	}
 
 	if (smoothDisVec.size() >= smoothSimilarityWindow)
 	{
@@ -216,7 +239,11 @@ void poseMatching::getSimilarity()
 
 
 	//余弦相似性
-	float cosineSimi = getCosineSimilarity(userActionKP, standardKP_toUse);
+	float cosineSimi = getCosineSimilarity(userKP_touse, standardKP_toUse);
+	if (AreaRatio < 0.2)  //affine失败
+	{
+		cosineSimi = 0;
+	}
 	if (smoothCosVec.size() >= smoothSimilarityWindow)
 	{
 		smoothCosVec.erase(smoothCosVec.begin());
@@ -230,6 +257,7 @@ int poseMatching::countAction()
 	//求距离相似性和余弦相似性在滑动平均窗口中的均值
 	float distSimi = getMean(smoothDisVec);
 	float cosSimi = getMean(smoothCosVec);
+
 	if (DEBUG)
 	{
 		cout << "distSimilarity: " << distSimi << endl;
@@ -440,4 +468,40 @@ float getMean(vector<float>& vec)
 	mean = mean / float(vec.size());
 
 	return mean;
+}
+
+
+//返回{ minX,minY,maxX,maxY };
+vector<float> getUserSize(vector<Point> userkp)
+{
+	float minX, minY, maxX, maxY;
+	minX = 10000;
+	minY = 10000;
+	maxX = -10000;
+	maxY = -10000;
+
+	for (int i = 0; i < userkp.size(); i++)
+	{
+		if (userkp[i].x < minX)
+		{
+			minX = userkp[i].x;
+		}
+		if (userkp[i].y < minY)
+		{
+			minY = userkp[i].y;
+		}
+
+		if (userkp[i].x > maxX)
+		{
+			maxX = userkp[i].x;
+		}
+		if (userkp[i].y > maxY)
+		{
+			maxY = userkp[i].y;
+		}
+	}
+
+	vector<float> s = { minX,minY,maxX,maxY };
+
+	return s;
 }
